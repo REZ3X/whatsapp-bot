@@ -1,4 +1,4 @@
-![Void X Bot]
+<img src="astolfo.png" alt="Void X Bot" width="300" height="auto">
 
 ## Features
 
