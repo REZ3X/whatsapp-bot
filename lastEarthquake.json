@@ -1,0 +1,18 @@
+{
+  "gempa": {
+    "Tanggal": "28 Apr 2025",
+    "Jam": "05:13:43 WIB",
+    "DateTime": "2025-04-27T22:13:43+00:00",
+    "point": {
+      "coordinates": "-0.10,124.40"
+    },
+    "Lintang": "0.10 LS",
+    "Bujur": "124.40 BT",
+    "Magnitude": "4.9",
+    "Kedalaman": "28 km",
+    "Wilayah": "Pusat gempa berada di laut 69 km tenggara Bolaang Uki, Bolaang Mongondow Selatan",
+    "Potensi": "Gempa ini dirasakan untuk diteruskan pada masyarakat",
+    "Dirasakan": "II Gorontalo",
+    "Shakemap": "20250428051343.mmi.jpg"
+  }
+}
