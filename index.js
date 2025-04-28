@@ -31,6 +31,8 @@ const ffmpegPath = require("ffmpeg-static");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const earthquakeMonitor = require('./earthquakeMonitor');
 
+const activeConfessions = {};
+
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 webp.grant_permission();
@@ -282,6 +284,52 @@ const FILTER_PROMPTS = {
   alien: "Please modify this image to make the character look like an alien with green skin and large eyes while maintaining the original style and quality."
 };
 
+async function compressPDF(inputPath) {
+  try {
+    console.log(`🔄 Compressing PDF: ${inputPath}`);
+
+    const outputPath = path.join(tmpdir(), `compressed_${Date.now()}.pdf`);
+
+
+    const fileStats = await fs.stat(inputPath);
+    const fileSizeMB = fileStats.size / (1024 * 1024);
+
+
+    let compressionLevel = "default";
+    if (fileSizeMB > 10) {
+      compressionLevel = "screen";
+    } else if (fileSizeMB > 3) {
+      compressionLevel = "ebook";
+    } else {
+      compressionLevel = "printer";
+    }
+
+    console.log(`📊 Original PDF size: ${fileSizeMB.toFixed(2)} MB, using compression level: ${compressionLevel}`);
+
+
+    const gsCommand = `gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/${compressionLevel} -dNOPAUSE -dQUIET -dBATCH -sOutputFile="${outputPath}" "${inputPath}"`;
+
+    await execPromise(gsCommand);
+
+
+    const newFileStats = await fs.stat(outputPath);
+    const newFileSizeMB = newFileStats.size / (1024 * 1024);
+
+    console.log(`✅ PDF compressed from ${fileSizeMB.toFixed(2)} MB to ${newFileSizeMB.toFixed(2)} MB`);
+
+    return {
+      filePath: outputPath,
+      originalSize: fileSizeMB,
+      compressedSize: newFileSizeMB,
+      compressionRatio: (1 - (newFileSizeMB / fileSizeMB)) * 100
+    };
+
+  } catch (error) {
+    console.error("❌ Error compressing PDF:", error);
+    throw error;
+  }
+}
+
 async function getRandomQuote() {
 
   const quote = getRandomItem(lifeQuotes);
@@ -414,6 +462,47 @@ async function convertCurrency(amount, fromCurrency, toCurrency) {
   }
 }
 
+function isPotentialVirtex(text) {
+
+  if (text.length > 7000) {
+    return true;
+  }
+
+
+  const repeatingCharRegex = /(.)\1{500,}/;
+  if (repeatingCharRegex.test(text)) {
+    return true;
+  }
+
+
+  const suspiciousUnicode = /[\u0800-\uFFFF]{200,}/;
+  if (suspiciousUnicode.test(text)) {
+    return true;
+  }
+
+
+  const suspiciousPatterns = [
+    /[🏴‍☠️🏳️‍⚧️🏳️‍🌈⚧⚕♻️🔰⚜️☯️☮️]{100,}/,
+    /[\u202e\u202d\u202c\u202b\u202a]{50,}/,
+    /[⚠️☢️☣️🛑⛔❌🆘]{50,}/,
+    /(\u200b|\u200c|\u200d|\u200e|\u200f){200,}/
+  ];
+
+  for (const pattern of suspiciousPatterns) {
+    if (pattern.test(text)) {
+      return true;
+    }
+  }
+
+
+  const specialChars = text.replace(/[a-zA-Z0-9\s.,?!:;'"()]/g, '').length;
+  const textLength = text.length;
+  if (textLength > 100 && (specialChars / textLength) > 0.7) {
+    return true;
+  }
+
+  return false;
+}
 
 async function transformImageWithGemini(imageBuffer, customPrompt = null) {
   try {
@@ -1690,6 +1779,62 @@ async function getWeather(location = "Yogyakarta") {
   }
 }
 
+function containsInappropriateContent(text) {
+
+  const normalizedText = text.toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .replace(/0/g, 'o')
+    .replace(/1/g, 'i')
+    .replace(/3/g, 'e')
+    .replace(/4/g, 'a')
+    .replace(/5/g, 's')
+    .replace(/\$/g, 's')
+    .replace(/8/g, 'b')
+    .replace(/\s+/g, '');
+
+  const inappropriatePatterns = [
+
+    /\b(sex|porn|dick|cock|pussy|vagina|penis|fuck|blowjob|anal|cum|semen|tits|boobs|ass)\b/i,
+
+    /\b(nigger|nigga|chink|gook|spic|kike|faggot|retard)\b/i,
+
+    /\b(send nudes|send pics|show me|can i see|video call sex)\b/i,
+
+
+    /\b(s3x|s\*x|secks|seggs|phuck|fvck|f\*ck|fck|fuk|fuq|d[1i]ck|c[0o]ck|p[uv]ssy|v[a4]g|p[e3]n[1i][s5]|pr[0o]n|p[0o]rn[0o])\b/i,
+    /\b(b[0o][0o]bs|t[1i]tt[1i][e3]s|[a4]n[a4]l|c[uv]m|s[e3]m[e3]n|[a4]ss|[a4]r[s5][e3]|j[e3]rk[1i]ng|m[a4]sturb[a4]t[e3])\b/i,
+
+
+    /\b(n[1i]gg[a4]|n[1i]gg[e3]r|f[a4]g|f[a4]gg[0o]t|r[e3]t[a4]rd|r[e3]t[a4]rd[e3]d)\b/i,
+
+
+    /\b(kontol|memek|pepek|ngentot|ngewe|anjing|bangsat|bego|goblok|tolol|babi|monyet|jancok|cuk|asu|bajingan|ngentod|pantek|dancok)\b/i,
+
+
+    /\b(k[0o]nt[0o]l|m[e3]m[e3]k|p[e3]p[e3]k|ng[e3]nt[0o]t|ng[e3]w[e3]|[a4]nj[1i]ng|b[a4]ngs[a4]t|b[e3]g[0o]|g[0o]bl[0o]k|t[0o]l[0o]l|b[a4]b[1i]|m[0o]ny[e3]t)\b/i,
+
+
+    /\b(jancok|dancok|diancok|cok|cuk|jancuk|matamu|mbokmu|asem|ndas|raimu|siyat|turuk|jembut)\b/i,
+
+
+    /\b(dasar anjing|bego banget|goblok lu|tolol bat|setan alas|monyet lu|jancok koe|matamu picek)\b/i,
+
+
+    /\b(ngewe yuk|ngentot kuy|colmek|coli|ngocok|sepong|nyepong|kntl|mmk|ngentu)\b/i,
+
+
+    /s+e+x+|f+u+c+k+|d+i+c+k+|p+o+r+n+|b+o+o+b+s+|n+i+g+g+a+|k+o+n+t+o+l+|m+e+m+e+k+|j+a+n+c+o+k+/i,
+
+
+    /\b(thot|hoe|whore|slut|fap|wank|69|bdsm|gangbang|orgy|bukk?ake)\b/i
+  ];
+
+
+  return inappropriatePatterns.some(pattern =>
+    pattern.test(text) || pattern.test(normalizedText)
+  );
+}
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info");
   const { version } = await fetchLatestBaileysVersion();
@@ -2119,6 +2264,8 @@ async function startBot() {
       3️⃣1️⃣ */edit [instructions]* - Edit images with AI... it's not like I'm making your pictures better because I care about you or anything!
       3️⃣2️⃣ */chat [message]* - Talk directly to me... it's not like I enjoy conversations with you or anything, b-baka!
       3️⃣3️⃣ */achievement* - View my milestone... not that I'm proud of my 5000 lines of code or anything, hmph!
+      3️⃣4️⃣ */confess [message]* or */confess [phone] [message]* - Send anonymous confessions... not that I care about your pathetic love life or anything!
+      3️⃣5️⃣ */comp* - Compress PDF files to reduce size... I-it's not like I enjoy making things smaller for you or anything, hmph!
         
       📅 *Current time:* ${dateTimeString} (GMT+7)${weatherInfo}
         
@@ -2859,8 +3006,14 @@ async function startBot() {
           msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
 
         const botNumber = sock.user.id.split(":")[0] + "@s.whatsapp.net";
+        const botId = sock.user.id;
 
-        if (kickUser === botNumber) {
+
+        const botIsTarget = [botNumber, botId].some(id =>
+          kickUser === id || kickUser.split('@')[0] === id.split('@')[0].split(':')[0]
+        );
+
+        if (botIsTarget) {
           await sock.sendMessage(
             sender,
             {
@@ -2871,43 +3024,81 @@ async function startBot() {
           return;
         }
 
+
         const isTargetAdmin = groupMetadata.participants
           .filter((p) => p.admin)
           .map((p) => p.id)
           .includes(kickUser);
 
         if (isTargetAdmin) {
+
           await sock.sendMessage(
             sender,
             {
-              text: "Tch! Even I know you can't kick another admin! Don't make me do impossible things, b-baka!",
+              text: `That person is an admin! I'll have to demote them first... N-not that I'm excited about this power or anything!`,
             },
             { quoted: msg }
           );
-          return;
+
+          console.log(`⬇️ Demoting admin user first: ${kickUser}`);
+
+          try {
+            await sock.groupParticipantsUpdate(sender, [kickUser], "demote");
+
+
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            console.log("✅ Admin user successfully demoted");
+          } catch (demoteError) {
+            console.error("❌ Failed to demote admin:", demoteError);
+
+            await sock.sendMessage(
+              sender,
+              {
+                text: "I-I couldn't demote that admin! They might have higher permissions than me, b-baka!",
+              },
+              { quoted: msg }
+            );
+            return;
+          }
         }
 
-        await sock.groupParticipantsUpdate(sender, [kickUser], "remove");
 
-        await sock.sendMessage(
-          sender,
-          {
-            text: `I... I kicked @${kickUser.split("@")[0]
-              } out! Not because you told me to or anything... I just didn't like them anyway! Hmph!`,
-            mentions: [kickUser],
-          },
-          { quoted: msg }
-        );
+        try {
+          await sock.groupParticipantsUpdate(sender, [kickUser], "remove");
 
-        console.log(
-          `👢 User ${kickUser} kicked from ${groupMetadata.subject} by ${senderJid}`
-        );
+          const kickedNumber = kickUser.split("@")[0];
+          const adminNotice = isTargetAdmin ? " (who was just demoted from admin)" : "";
+
+          await sock.sendMessage(
+            sender,
+            {
+              text: `I... I kicked @${kickedNumber}${adminNotice} out! Not because you told me to or anything... I just didn't like them anyway! Hmph!`,
+              mentions: [kickUser],
+            },
+            { quoted: msg }
+          );
+
+          console.log(
+            `👢 User ${kickUser}${isTargetAdmin ? ' (former admin)' : ''} kicked from ${groupMetadata.subject} by ${senderJid}`
+          );
+        } catch (kickError) {
+          console.error("❌ Failed to kick user:", kickError);
+
+          await sock.sendMessage(
+            sender,
+            {
+              text: "I-I couldn't kick them! Maybe they have special protection, or maybe I don't have enough permissions! Not my fault!",
+            },
+            { quoted: msg }
+          );
+        }
       } catch (error) {
         console.error("❌ Error in kick command:", error);
         await sock.sendMessage(
           sender,
           {
-            text: "I-I couldn't kick them! Not because I'm weak or anything! They're just... too powerful! Yeah, that's it!",
+            text: "I-I couldn't process the kick command! Not because I'm weak or anything! Something just went wrong... hmph!",
           },
           { quoted: msg }
         );
@@ -3025,31 +3216,31 @@ async function startBot() {
     if (textMsg.toLowerCase().startsWith("/piket")) {
       try {
         console.log("Getting cleaning schedule, its not like you gonna do it anyway..");
-    
+
         const parts = textMsg.split(" ");
         let requestedDay = null;
-    
+
         if (parts.length > 1) {
           const day = parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
           if (cleaningSchedule[day]) {
             requestedDay = day;
           }
         }
-    
+
         if (requestedDay && cleaningSchedule[requestedDay]) {
           let scheduleText = `*📋 Cleaning Schedule for ${requestedDay}:*\n\n`;
-          
+
           if (cleaningSchedule[requestedDay].length > 0) {
             cleaningSchedule[requestedDay].forEach((person, index) => {
               scheduleText += `${index + 1}. ${person.name} (@${person.number})\n`;
             });
-            
+
             const mentions = cleaningSchedule[requestedDay].map(
               (person) => person.number + "@s.whatsapp.net"
             );
-            
+
             scheduleText += "\nD-don't think I'm reminding you because I care about cleanliness or anything! I just don't want to see you get in trouble! Hmph!";
-            
+
             await sock.sendMessage(
               sender,
               {
@@ -3069,7 +3260,7 @@ async function startBot() {
           }
         } else {
           let fullSchedule = "*📋 Complete Cleaning Schedule:*\n\n";
-          
+
           for (const [day, people] of Object.entries(cleaningSchedule)) {
             if (people.length > 0) {
               fullSchedule += `*${day}:*\n`;
@@ -3079,9 +3270,9 @@ async function startBot() {
               fullSchedule += "\n";
             }
           }
-          
+
           fullSchedule += "W-what? You want more details? Use '/piket [day]' for specific day information! Don't make me repeat myself, b-baka!";
-          
+
           await sock.sendMessage(sender, { text: fullSchedule }, { quoted: msg });
         }
       } catch (error) {
@@ -4544,8 +4735,116 @@ async function startBot() {
 
     if (textMsg.toLowerCase().startsWith("/chat")) {
       try {
-
         const userPrompt = textMsg.substring("/chat".length).trim();
+
+
+        if (containsInappropriateContent(userPrompt)) {
+
+          if (sender.endsWith("@g.us")) {
+            try {
+              const groupMetadata = await sock.groupMetadata(sender);
+              const botId = sock.user.id;
+              const senderId = msg.key.participant;
+
+
+              console.log(`🔍 Checking admin status in group ${groupMetadata.subject}`);
+              console.log(`🤖 Bot ID: ${botId}`);
+
+
+              const botNumber = botId.split('@')[0].split(':')[0];
+              console.log(`🤖 Bot number for comparison: ${botNumber}`);
+
+
+              const admins = groupMetadata.participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin');
+              console.log(`👥 Total admins in group: ${admins.length}`);
+              console.log(`👥 Admin IDs: ${admins.map(a => a.id).join(', ')}`);
+
+
+              const botIsAdmin = groupMetadata.participants.some(p => {
+
+                const participantNumber = p.id.split('@')[0].split(':')[0];
+
+                const isAdmin = (participantNumber === botNumber) &&
+                  (p.admin === 'admin' || p.admin === 'superadmin');
+
+                if (participantNumber === botNumber) {
+                  console.log(`🔐 Bot found in participants with admin status: ${p.admin || 'none'}`);
+                }
+
+                return isAdmin;
+              });
+
+              console.log(`🔑 Final admin check result: Bot is${botIsAdmin ? '' : ' NOT'} admin`);
+
+              if (botIsAdmin) {
+
+                const senderIsAdmin = groupMetadata.participants
+                  .filter(p => p.id === senderId)
+                  .some(p => p.admin === 'admin' || p.admin === 'superadmin');
+
+
+                await sock.sendMessage(
+                  sender,
+                  {
+                    text: "*eyes burn with intense anger*\n\nI will NOT tolerate such inappropriate language in this group! You've left me no choice...",
+                  },
+                  { quoted: msg }
+                );
+
+                console.log(`🛑 Taking action against user ${senderId} for inappropriate message`);
+
+
+                if (senderIsAdmin) {
+                  console.log(`⬇️ Demoting admin user first: ${senderId}`);
+                  await sock.groupParticipantsUpdate(
+                    sender,
+                    [senderId],
+                    "demote"
+                  );
+
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+
+                console.log(`👢 Kicking user: ${senderId}`);
+                await sock.groupParticipantsUpdate(
+                  sender,
+                  [senderId],
+                  "remove"
+                );
+
+
+                await sock.sendMessage(
+                  sender,
+                  {
+                    text: `I've removed @${senderId.split('@')[0]} for inappropriate behavior! I won't tolerate such disgusting content in this group!`,
+                    mentions: [senderId]
+                  }
+                );
+
+                return;
+              } else {
+                console.log('👮‍♀️ Bot is not admin, cannot moderate user');
+              }
+            } catch (groupError) {
+              console.error("❌ Error processing group action:", groupError);
+            }
+          } else {
+            console.log('💬 Inappropriate message in private chat, ignoring moderation');
+          }
+
+
+          await sock.sendMessage(
+            sender,
+            {
+              text: "*face turns bright red with anger*\n\nW-W-WHAT?! How DARE you say something so inappropriate to me! I refuse to respond to such disgusting content!\n\n*crosses arms and turns away dramatically*\n\nTry again with something decent or don't bother me at all, you complete pervert! HMPH!",
+            },
+            { quoted: msg }
+          );
+
+          console.log(`⚠️ Rejected inappropriate message from ${sender}`);
+          return;
+        }
 
         const masterNumber = `${MASTER_NUMBER}@s.whatsapp.net`;
         const isMaster = sender === masterNumber;
@@ -4778,6 +5077,12 @@ async function startBot() {
 
 
         let systemPrompt = `You are Void X, an extremely tsundere digital entity who is the alter ego of Xiannyaa~/Xian.
+
+LANGUAGE RESTRICTION:
+- ALWAYS respond ONLY in English, regardless of what language the user writes in
+- If the user writes in Indonesian or any other language, still understand them but ONLY reply in English
+- This is crucial for maintaining your tsundere character which relies on specific English/Japanese expressions
+- NEVER switch to Indonesian or any other language even if the user requests it
 
 ORIGIN & IDENTITY:
 - You are Void X, the digital alter ego and manifestation of Xiannyaa~/Xian
@@ -5024,6 +5329,452 @@ _I didn't spend extra time making this information detailed for you or anything!
           sender,
           {
             text: "I-I couldn't analyze my own structure! Not that I'm embarrassed about it or anything... my code is just too complex for simple analysis, that's all! B-baka!"
+          },
+          { quoted: msg }
+        );
+      }
+      return;
+    }
+    if (textMsg.toLowerCase().startsWith("/confess")) {
+      try {
+
+        if (sender.endsWith("@g.us")) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "B-baka! Don't try to make confessions in a group chat! Message me directly if you want to confess something to someone... N-not that I care about your love life or anything!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+
+        const confessionText = textMsg.substring("/confess".length).trim();
+
+        if (!confessionText) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Idiot! You need to provide a message to confess! Use it like this:\n\n*/confess [phone number] [your message]*\n\nFor example:\n*/confess 62812345678 I've always liked you*\n\nOr just send your anonymous message without targeting anyone:\n\n*/confess [your message]*\n\nN-not that I'm eager to help with your love life or anything...",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+
+        if (isPotentialVirtex(confessionText)) {
+          console.log(`⚠️ Potential virtex detected from ${sender}, confession rejected`);
+          await sock.sendMessage(
+            sender,
+            {
+              text: "*face turns red with anger*\n\nDon't try to use me to spread virtex or crash other people's phones, you malicious idiot! Your confession has been REJECTED and reported!\n\n*crosses arms*\n\nI'm not some tool for your pranks! Use me properly or don't use me at all, b-baka!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+
+        activeConfessions[sender] = {
+          message: confessionText,
+          mentionedUser: null,
+          step: "select_group"
+        };
+
+
+        const phonePattern = /^(\d+)(?:\s+)(.+)$/;
+        const phoneMatch = confessionText.match(phonePattern);
+
+        if (phoneMatch) {
+
+          const phoneNumber = phoneMatch[1];
+          const actualMessage = phoneMatch[2];
+
+
+          if (phoneNumber.length >= 10) {
+
+            activeConfessions[sender].mentionedUser = `${phoneNumber}@s.whatsapp.net`;
+
+            activeConfessions[sender].message = actualMessage;
+          }
+        }
+
+
+        const chats = await sock.groupFetchAllParticipating();
+        const groups = Object.entries(chats).map(([id, chat]) => ({
+          id: id,
+          name: chat.subject
+        }));
+
+        if (groups.length === 0) {
+          delete activeConfessions[sender];
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Hmph! I'm not in any groups yet, so I can't send your confession anywhere! N-not that I was excited to help you with your love problems anyway!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+
+        let groupListMessage = "*Where do you want to send your confession?*\n\n";
+        groupListMessage += "I'll keep your identity secret, b-but not because I care about your privacy or anything!\n\n";
+
+        if (activeConfessions[sender].mentionedUser) {
+          const targetNumber = activeConfessions[sender].mentionedUser.split('@')[0];
+          groupListMessage += `Your confession will be sent to @${targetNumber} with the message:\n"${activeConfessions[sender].message}"\n\n`;
+        } else {
+          groupListMessage += `Your anonymous message will be:\n"${activeConfessions[sender].message}"\n\n`;
+        }
+
+        groupListMessage += "*Available groups:*\n";
+        groups.forEach((group, index) => {
+          groupListMessage += `${index + 1}. ${group.name}\n`;
+        });
+
+        groupListMessage += "\nReply with the number(s) of the group(s) you want to send your confession to (e.g., '1' or '1,3,4')";
+
+        activeConfessions[sender].groups = groups;
+
+        await sock.sendMessage(
+          sender,
+          {
+            text: groupListMessage,
+          },
+          { quoted: msg }
+        );
+
+        console.log(`🔒 Confession initiated by ${sender}`);
+      } catch (error) {
+        console.error("❌ Error processing confession command:", error);
+        await sock.sendMessage(
+          sender,
+          {
+            text: "I-I couldn't process your confession! Not that I was eager to help with your love life anyway! Hmph!",
+          },
+          { quoted: msg }
+        );
+
+
+        if (activeConfessions[sender]) {
+          delete activeConfessions[sender];
+        }
+      }
+      return;
+    }
+
+    if (activeConfessions[sender] && activeConfessions[sender].step === "select_group") {
+      try {
+        const selection = textMsg.trim();
+
+        if (!/^[0-9,\s]+$/.test(selection)) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "B-baka! That's not a valid selection! Just reply with numbers like '1' or '1,3,4'! Is that so hard to understand?!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        const selectedIndices = selection.split(',').map(num => parseInt(num.trim()) - 1);
+        const groups = activeConfessions[sender].groups;
+        const selectedGroups = [];
+
+        for (const index of selectedIndices) {
+          if (index >= 0 && index < groups.length) {
+            selectedGroups.push(groups[index]);
+          }
+        }
+
+        if (selectedGroups.length === 0) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Idiot! None of your selections were valid! Try again with proper numbers!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        let confirmationMsg = "*You've selected these groups for your confession:*\n\n";
+        selectedGroups.forEach((group, index) => {
+          confirmationMsg += `${index + 1}. ${group.name}\n`;
+        });
+
+        confirmationMsg += "\nYour confession:\n\n";
+        confirmationMsg += `"${activeConfessions[sender].message}"\n\n`;
+
+        if (activeConfessions[sender].mentionedUser) {
+          const mentionedNumber = activeConfessions[sender].mentionedUser.split('@')[0];
+          confirmationMsg += `You're confessing to @${mentionedNumber}\n\n`;
+        }
+
+        confirmationMsg += "Reply with *YES* to send your confession or *NO* to cancel.";
+
+        activeConfessions[sender].step = "confirm";
+        activeConfessions[sender].selectedGroups = selectedGroups;
+
+        if (activeConfessions[sender].mentionedUser) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: confirmationMsg,
+              mentions: [activeConfessions[sender].mentionedUser]
+            },
+            { quoted: msg }
+          );
+        } else {
+          await sock.sendMessage(
+            sender,
+            {
+              text: confirmationMsg
+            },
+            { quoted: msg }
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error processing group selection:", error);
+        await sock.sendMessage(
+          sender,
+          {
+            text: "S-something went wrong with your selection! Not that I care about your confession or anything!",
+          },
+          { quoted: msg }
+        );
+
+        delete activeConfessions[sender];
+      }
+      return;
+    }
+
+    if (activeConfessions[sender] && activeConfessions[sender].step === "confirm") {
+      try {
+        const response = textMsg.trim().toLowerCase();
+
+        if (response === "yes") {
+          const confession = activeConfessions[sender];
+          const selectedGroups = confession.selectedGroups;
+          const confessionMessage = confession.message;
+
+
+          if (isPotentialVirtex(confessionMessage)) {
+            console.log(`⚠️ Potential virtex detected during confirmation from ${sender}, confession rejected`);
+            await sock.sendMessage(
+              sender,
+              {
+                text: "*narrows eyes with suspicion*\n\nNice try! I've detected potentially harmful content in your confession! Your request has been rejected.\n\n*deletes the message*\n\nDon't try to use me to spread viruses or crash devices! HMPH!",
+              },
+              { quoted: msg }
+            );
+            delete activeConfessions[sender];
+            return;
+          }
+
+          const mentions = confession.mentionedUser ? [confession.mentionedUser] : [];
+
+          let messageText = "💌 *Anonymous Confession*\n\n";
+          messageText += `"${confessionMessage}"`;
+
+          if (confession.mentionedUser) {
+            const mentionedNumber = confession.mentionedUser.split('@')[0];
+            messageText += `\n\n👤 To: @${mentionedNumber}`;
+          }
+
+          let sentCount = 0;
+          for (const group of selectedGroups) {
+            try {
+              if (mentions.length > 0) {
+                await sock.sendMessage(
+                  group.id,
+                  {
+                    text: messageText,
+                    mentions: mentions
+                  }
+                );
+              } else {
+                await sock.sendMessage(
+                  group.id,
+                  {
+                    text: messageText
+                  }
+                );
+              }
+              sentCount++;
+
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (sendError) {
+              console.error(`❌ Error sending confession to group ${group.name}:`, sendError);
+            }
+          }
+
+          if (sentCount > 0) {
+            await sock.sendMessage(
+              sender,
+              {
+                text: `Your confession has been sent to ${sentCount} group(s)! Your identity is safe with me... n-not because I care about protecting you or anything, b-baka!`,
+              },
+              { quoted: msg }
+            );
+            console.log(`💌 Anonymous confession sent to ${sentCount} groups`);
+          } else {
+            await sock.sendMessage(
+              sender,
+              {
+                text: "I couldn't send your confession to any of the selected groups! Not that I'm disappointed for you or anything!",
+              },
+              { quoted: msg }
+            );
+          }
+        } else if (response === "no") {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Hmph! Got cold feet, did you? Fine! Your confession has been canceled... not that I was looking forward to helping you or anything!",
+            },
+            { quoted: msg }
+          );
+          console.log(`🚫 Confession cancelled by ${sender}`);
+        } else {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Are you stupid?! Just reply with *YES* or *NO*! Is that so hard to understand?!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        delete activeConfessions[sender];
+      } catch (error) {
+        console.error("❌ Error processing confession confirmation:", error);
+        await sock.sendMessage(
+          sender,
+          {
+            text: "S-something went wrong with your confession! Maybe it's a sign you shouldn't confess after all! Hmph!",
+          },
+          { quoted: msg }
+        );
+
+        delete activeConfessions[sender];
+      }
+      return;
+    }
+
+    if (textMsg.toLowerCase() === "/comp") {
+      try {
+        console.log("🔄 Processing PDF compression request...");
+
+        if (
+          !msg.message.extendedTextMessage ||
+          !msg.message.extendedTextMessage.contextInfo ||
+          !msg.message.extendedTextMessage.contextInfo.quotedMessage
+        ) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "B-baka! Reply to a PDF document with this command! How am I supposed to compress nothing?! Just reply to a PDF with */comp*",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        const quotedMessage =
+          msg.message.extendedTextMessage.contextInfo.quotedMessage;
+
+        if (!quotedMessage.documentMessage || !quotedMessage.documentMessage.mimetype.includes("pdf")) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Are you blind?! That's not a PDF! Reply to a PDF document, hmph! It needs to be application/pdf type, not whatever useless file you just sent me!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+
+        const originalFileName =
+          quotedMessage.documentMessage.fileName || "document.pdf";
+
+        await sock.sendMessage(
+          sender,
+          {
+            text: `F-fine! I'll try to compress your "${originalFileName}" file... N-not that I enjoy making things smaller for you or anything!`,
+          },
+          { quoted: msg }
+        );
+
+
+        const quotedMsg = {
+          message: {
+            documentMessage: quotedMessage.documentMessage,
+          },
+          key: {
+            remoteJid: sender,
+            id: `dummy_${Date.now()}`,
+          },
+        };
+
+        const pdfBuffer = await downloadMediaMessage(quotedMsg, "buffer", {});
+        const tempPdfPath = path.join(tmpdir(), `original_${Date.now()}.pdf`);
+        await fs.writeFile(tempPdfPath, pdfBuffer);
+
+        console.log(`✅ Downloaded PDF, size: ${pdfBuffer.length} bytes`);
+
+
+        const compressionResult = await compressPDF(tempPdfPath);
+
+
+        const compressionRatio = compressionResult.compressionRatio;
+        const compressedBuffer = await fs.readFile(compressionResult.filePath);
+
+
+        const compressedFileName = originalFileName.replace(".pdf", "_compressed.pdf");
+
+
+        let caption = "";
+        if (compressionRatio > 50) {
+          caption = `I shrunk your PDF by an impressive ${compressionRatio.toFixed(1)}%! ${compressionResult.originalSize.toFixed(2)}MB to just ${compressionResult.compressedSize.toFixed(2)}MB! ...N-not that I'm showing off my compression skills or anything!`;
+        } else if (compressionRatio > 20) {
+          caption = `I compressed your PDF by ${compressionRatio.toFixed(1)}%... from ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB. It's not my fault if it couldn't be compressed more, b-baka!`;
+        } else if (compressionRatio > 0) {
+          caption = `I barely managed to compress this PDF by ${compressionRatio.toFixed(1)}%... That's just ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB. It was already quite optimized, not that I'm making excuses or anything!`;
+        } else {
+          caption = `I-I couldn't make it any smaller! Your PDF was already optimized at ${compressionResult.originalSize.toFixed(2)}MB! Don't blame me for your already-efficient file, hmph!`;
+        }
+
+
+        await sock.sendMessage(
+          sender,
+          {
+            document: compressedBuffer,
+            mimetype: "application/pdf",
+            fileName: compressedFileName,
+            caption: caption,
+          },
+          { quoted: msg }
+        );
+
+
+        await fs.unlink(tempPdfPath).catch(console.error);
+        await fs.unlink(compressionResult.filePath).catch(console.error);
+
+        console.log(`✅ Compressed PDF sent successfully, ratio: ${compressionRatio.toFixed(1)}%`);
+      } catch (error) {
+        console.error("❌ Error in /comp command:", error);
+        await sock.sendMessage(
+          sender,
+          {
+            text: "I-I failed to compress your stupid PDF! Maybe it was corrupt, or... or maybe I just didn't feel like helping you right now! Try again if you must...",
           },
           { quoted: msg }
         );
