@@ -287,6 +287,16 @@ const FILTER_PROMPTS = {
 async function compressPDF(inputPath) {
   try {
     console.log(`🔄 Compressing PDF: ${inputPath}`);
+    const SIZE_LIMIT_MB = 2;
+    const SIZE_LIMIT_BYTES = SIZE_LIMIT_MB * 1024 * 1024;
+
+
+    try {
+      await fs.access(inputPath);
+      console.log("✅ Input file is accessible");
+    } catch (err) {
+      throw new Error(`Input file not accessible: ${err.message}`);
+    }
 
     const outputPath = path.join(tmpdir(), `compressed_${Date.now()}.pdf`);
 
@@ -294,34 +304,295 @@ async function compressPDF(inputPath) {
     const fileStats = await fs.stat(inputPath);
     const fileSizeMB = fileStats.size / (1024 * 1024);
 
+    console.log(`📊 Original PDF size: ${fileSizeMB.toFixed(2)} MB, target size: ${SIZE_LIMIT_MB} MB`);
 
-    let compressionLevel = "default";
+
+    const needsAggressive = fileSizeMB > SIZE_LIMIT_MB;
+
+
+    let compressionLevel;
+    let extraOptions = [];
+
     if (fileSizeMB > 10) {
       compressionLevel = "screen";
-    } else if (fileSizeMB > 3) {
+      extraOptions.push('-dColorImageDownsampleType=/Subsample');
+      extraOptions.push('-dColorImageResolution=72');
+      extraOptions.push('-dGrayImageDownsampleType=/Subsample');
+      extraOptions.push('-dGrayImageResolution=72');
+      extraOptions.push('-dMonoImageDownsampleType=/Subsample');
+      extraOptions.push('-dMonoImageResolution=72');
+    } else if (fileSizeMB > 5) {
       compressionLevel = "ebook";
+      extraOptions.push('-dColorImageDownsampleType=/Subsample');
+      extraOptions.push('-dColorImageResolution=100');
+      extraOptions.push('-dGrayImageDownsampleType=/Subsample');
+      extraOptions.push('-dGrayImageResolution=100');
+    } else if (fileSizeMB > 2) {
+      compressionLevel = "ebook";
+      extraOptions.push('-dColorImageDownsampleType=/Subsample');
+      extraOptions.push('-dColorImageResolution=150');
     } else {
-      compressionLevel = "printer";
+      compressionLevel = needsAggressive ? "ebook" : "printer";
     }
 
-    console.log(`📊 Original PDF size: ${fileSizeMB.toFixed(2)} MB, using compression level: ${compressionLevel}`);
+    console.log(`📊 Using compression level: ${compressionLevel} with ${needsAggressive ? 'aggressive' : 'standard'} settings`);
 
 
-    const gsCommand = `gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/${compressionLevel} -dNOPAUSE -dQUIET -dBATCH -sOutputFile="${outputPath}" "${inputPath}"`;
+    const compressionStrategies = [
 
-    await execPromise(gsCommand);
+      async () => {
+        const gsCommand = [
+          'gs',
+          '-sDEVICE=pdfwrite',
+          '-dCompatibilityLevel=1.4',
+          `-dPDFSETTINGS=/${compressionLevel}`,
+          '-dDetectDuplicateImages=true',
+          '-dEmbedAllFonts=false',
+          '-dSubsetFonts=true',
+          '-dCompressFonts=true',
+          '-dCompressPages=true',
+          '-dAutoFilterColorImages=true',
+          '-dAutoFilterGrayImages=true',
+          '-dDownsampleMonoImages=true',
+          '-dDownsampleGrayImages=true',
+          '-dDownsampleColorImages=true',
+          ...extraOptions,
+          '-dNOPAUSE',
+          '-dQUIET',
+          '-dBATCH',
+          `-sOutputFile="${outputPath}"`,
+          `"${inputPath}"`
+        ].join(' ');
+
+        await execPromise(gsCommand);
+        return outputPath;
+      },
 
 
-    const newFileStats = await fs.stat(outputPath);
-    const newFileSizeMB = newFileStats.size / (1024 * 1024);
+      async () => {
+        const tempPath = path.join(tmpdir(), `temp_${Date.now()}.pdf`);
+        const gsCommand = [
+          'gs',
+          '-sDEVICE=pdfwrite',
+          '-dCompatibilityLevel=1.4',
+          '-dPDFSETTINGS=/screen',
+          '-dColorImageDownsampleType=/Average',
+          '-dColorImageResolution=72',
+          '-dGrayImageDownsampleType=/Average',
+          '-dGrayImageResolution=72',
+          '-dMonoImageDownsampleType=/Subsample',
+          '-dMonoImageResolution=72',
+          '-dEmbedAllFonts=false',
+          '-dSubsetFonts=true',
+          '-dCompressFonts=true',
+          '-dCompressPages=true',
+          '-dNOPAUSE',
+          '-dQUIET',
+          '-dBATCH',
+          `-sOutputFile="${tempPath}"`,
+          `"${inputPath}"`
+        ].join(' ');
 
-    console.log(`✅ PDF compressed from ${fileSizeMB.toFixed(2)} MB to ${newFileSizeMB.toFixed(2)} MB`);
+        await execPromise(gsCommand);
+        return tempPath;
+      },
+
+
+      async () => {
+        const tempPath = path.join(tmpdir(), `temp_extreme_${Date.now()}.pdf`);
+        const gsCommand = [
+          'gs',
+          '-sDEVICE=pdfwrite',
+          '-dCompatibilityLevel=1.4',
+          '-dPDFSETTINGS=/screen',
+          '-dEmbedAllFonts=false',
+          '-dSubsetFonts=true',
+          '-dCompressFonts=true',
+          '-dColorImageDownsampleType=/Subsample',
+          '-dColorImageResolution=50',
+          '-dGrayImageDownsampleType=/Subsample',
+          '-dGrayImageResolution=50',
+          '-dMonoImageDownsampleType=/Subsample',
+          '-dMonoImageResolution=50',
+          '-dCompressPages=true',
+          '-dNOPAUSE',
+          '-dQUIET',
+          '-dBATCH',
+          `-sOutputFile="${tempPath}"`,
+          `"${inputPath}"`
+        ].join(' ');
+
+        await execPromise(gsCommand);
+        return tempPath;
+      },
+
+
+      async () => {
+        const tempPath = path.join(tmpdir(), `temp_school_${Date.now()}.pdf`);
+        const gsCommand = [
+          'gs',
+          '-sDEVICE=pdfwrite',
+          '-dCompatibilityLevel=1.4',
+          '-dPDFSETTINGS=/screen',
+          '-dEmbedAllFonts=false',
+          '-dSubsetFonts=true',
+          '-dCompressFonts=true',
+          '-dColorImageDownsampleType=/Subsample',
+          '-dColorImageResolution=36',
+          '-dGrayImageDownsampleType=/Subsample',
+          '-dGrayImageResolution=36',
+          '-dMonoImageDownsampleType=/Subsample',
+          '-dMonoImageResolution=36',
+          '-dCompressPages=true',
+          '-dNOPAUSE',
+          '-dQUIET',
+          '-dBATCH',
+          '-dColorConversionStrategy=/LeaveColorUnchanged',
+          '-dEncodeColorImages=false',
+          '-dEncodeGrayImages=false',
+          '-dEncodeMonoImages=false',
+          `-sOutputFile="${tempPath}"`,
+          `"${inputPath}"`
+        ].join(' ');
+
+        await execPromise(gsCommand);
+        return tempPath;
+      }
+    ];
+
+
+    let bestResultPath = null;
+    let bestCompressionRatio = -1;
+    let bestFileSize = fileSizeMB;
+    let tempFiles = [];
+    let targetReached = false;
+
+    for (let i = 0; i < compressionStrategies.length && !targetReached; i++) {
+      try {
+        const strategyName = ['Standard', 'Aggressive', 'Extreme', 'School Mode'][i];
+        console.log(`🔄 Trying compression strategy ${i + 1}: ${strategyName}`);
+
+        const resultPath = await compressionStrategies[i]();
+        tempFiles.push(resultPath);
+
+
+        try {
+          await fs.access(resultPath);
+          console.log(`✅ Output file created with strategy ${i + 1}`);
+        } catch (err) {
+          console.log(`❌ Strategy ${i + 1} failed to create output file: ${err.message}`);
+          continue;
+        }
+
+
+        const newFileStats = await fs.stat(resultPath);
+        const newFileSizeBytes = newFileStats.size;
+        const newFileSizeMB = newFileSizeBytes / (1024 * 1024);
+        const compressionRatio = (1 - (newFileSizeMB / fileSizeMB)) * 100;
+
+        console.log(`📊 Strategy ${i + 1} result: ${fileSizeMB.toFixed(2)} MB → ${newFileSizeMB.toFixed(2)} MB (${compressionRatio.toFixed(1)}% reduction)`);
+
+
+        if (newFileSizeBytes <= SIZE_LIMIT_BYTES) {
+          console.log(`🎯 Target size achieved: ${newFileSizeMB.toFixed(2)} MB is under ${SIZE_LIMIT_MB} MB limit`);
+          bestResultPath = resultPath;
+          bestCompressionRatio = compressionRatio;
+          bestFileSize = newFileSizeMB;
+          targetReached = true;
+          break;
+        }
+
+
+        if (compressionRatio > bestCompressionRatio && compressionRatio > 0) {
+          bestCompressionRatio = compressionRatio;
+          bestResultPath = resultPath;
+          bestFileSize = newFileSizeMB;
+        }
+
+
+        if (newFileSizeBytes <= SIZE_LIMIT_BYTES) {
+          console.log(`✅ Target size reached (${newFileSizeMB.toFixed(2)} MB), stopping compression attempts`);
+          break;
+        }
+      } catch (strategyError) {
+        console.error(`❌ Compression strategy ${i + 1} failed:`, strategyError);
+      }
+    }
+
+
+    if (bestResultPath && !targetReached && bestFileSize > SIZE_LIMIT_MB) {
+      try {
+        console.log("⚠️ Still over size limit, attempting last resort compression with qpdf");
+        const lastResortPath = path.join(tmpdir(), `last_resort_${Date.now()}.pdf`);
+
+
+        try {
+          await execPromise("which qpdf");
+
+
+          await execPromise(`qpdf --linearize --compress-streams=y --decode-level=specialized --object-streams=generate "${bestResultPath}" "${lastResortPath}"`);
+
+          const finalStats = await fs.stat(lastResortPath);
+          const finalSizeMB = finalStats.size / (1024 * 1024);
+
+          console.log(`📊 Last resort result: ${bestFileSize.toFixed(2)} MB → ${finalSizeMB.toFixed(2)} MB`);
+
+          if (finalStats.size < await fs.stat(bestResultPath).then(s => s.size)) {
+            tempFiles.push(lastResortPath);
+            bestResultPath = lastResortPath;
+            bestFileSize = finalSizeMB;
+            bestCompressionRatio = (1 - (finalSizeMB / fileSizeMB)) * 100;
+          }
+        } catch (qpdfError) {
+          console.log("⚠️ qpdf not available or failed:", qpdfError.message);
+        }
+      } catch (lastResortError) {
+        console.error("❌ Last resort compression failed:", lastResortError);
+      }
+    }
+
+
+    if (!bestResultPath) {
+      console.log("⚠️ No effective compression strategy found, returning original file");
+
+
+      for (const file of tempFiles) {
+        try { await fs.unlink(file); } catch (e) { /* ignore */ }
+      }
+
+
+      await fs.copyFile(inputPath, outputPath);
+
+      return {
+        filePath: outputPath,
+        originalSize: fileSizeMB,
+        compressedSize: fileSizeMB,
+        compressionRatio: 0,
+        underSizeLimit: fileSizeMB <= SIZE_LIMIT_MB
+      };
+    }
+
+
+    if (bestResultPath !== outputPath) {
+      await fs.copyFile(bestResultPath, outputPath);
+    }
+
+
+    for (const file of tempFiles) {
+      if (file !== bestResultPath) {
+        try { await fs.unlink(file); } catch (e) { /* ignore */ }
+      }
+    }
+
+    console.log(`✅ Best compression: ${fileSizeMB.toFixed(2)} MB → ${bestFileSize.toFixed(2)} MB (${bestCompressionRatio.toFixed(1)}% reduction)`);
+    console.log(`🎓 School upload ready: ${bestFileSize <= SIZE_LIMIT_MB ? 'YES! Under 2MB ✅' : 'NO! Still over 2MB ❌'}`);
 
     return {
       filePath: outputPath,
       originalSize: fileSizeMB,
-      compressedSize: newFileSizeMB,
-      compressionRatio: (1 - (newFileSizeMB / fileSizeMB)) * 100
+      compressedSize: bestFileSize,
+      compressionRatio: bestCompressionRatio,
+      underSizeLimit: bestFileSize <= SIZE_LIMIT_MB
     };
 
   } catch (error) {
@@ -5690,17 +5961,34 @@ _I didn't spend extra time making this information detailed for you or anything!
         const quotedMessage =
           msg.message.extendedTextMessage.contextInfo.quotedMessage;
 
-        if (!quotedMessage.documentMessage || !quotedMessage.documentMessage.mimetype.includes("pdf")) {
+
+        console.log("📄 Checking quoted message type:", JSON.stringify({
+          hasDocumentMessage: !!quotedMessage.documentMessage,
+          mimeType: quotedMessage.documentMessage?.mimetype
+        }));
+
+        if (!quotedMessage.documentMessage) {
           await sock.sendMessage(
             sender,
             {
-              text: "Are you blind?! That's not a PDF! Reply to a PDF document, hmph! It needs to be application/pdf type, not whatever useless file you just sent me!",
+              text: "That doesn't look like a document at all! Reply to a PDF file, b-baka!",
             },
             { quoted: msg }
           );
           return;
         }
 
+        if (!quotedMessage.documentMessage.mimetype ||
+          !quotedMessage.documentMessage.mimetype.toLowerCase().includes("pdf")) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: `Are you blind?! That's not a PDF! It appears to be ${quotedMessage.documentMessage.mimetype || "an unknown type"}. Reply to a PDF document, hmph!`,
+            },
+            { quoted: msg }
+          );
+          return;
+        }
 
         const originalFileName =
           quotedMessage.documentMessage.fileName || "document.pdf";
@@ -5713,62 +6001,103 @@ _I didn't spend extra time making this information detailed for you or anything!
           { quoted: msg }
         );
 
-
+        const stanzaId = msg.message.extendedTextMessage?.contextInfo?.stanzaId;
         const quotedMsg = {
           message: {
             documentMessage: quotedMessage.documentMessage,
           },
           key: {
             remoteJid: sender,
-            id: `dummy_${Date.now()}`,
+            id: stanzaId || `dummy_${Date.now()}`,
           },
         };
 
-        const pdfBuffer = await downloadMediaMessage(quotedMsg, "buffer", {});
-        const tempPdfPath = path.join(tmpdir(), `original_${Date.now()}.pdf`);
-        await fs.writeFile(tempPdfPath, pdfBuffer);
+        console.log("📥 Downloading PDF document...");
 
-        console.log(`✅ Downloaded PDF, size: ${pdfBuffer.length} bytes`);
+        try {
+          const pdfBuffer = await downloadMediaMessage(quotedMsg, "buffer", {});
+
+          if (!pdfBuffer || pdfBuffer.length === 0) {
+            throw new Error("Downloaded buffer is empty");
+          }
+
+          console.log(`✅ Downloaded PDF, size: ${pdfBuffer.length} bytes`);
+
+          const tempPdfPath = path.join(tmpdir(), `original_${Date.now()}.pdf`);
+          await fs.writeFile(tempPdfPath, pdfBuffer);
+          console.log(`✍️ PDF saved to temporary file: ${tempPdfPath}`);
 
 
-        const compressionResult = await compressPDF(tempPdfPath);
+          const fileHeader = pdfBuffer.slice(0, 5).toString();
+          if (!fileHeader.startsWith('%PDF')) {
+            throw new Error("The downloaded file doesn't appear to be a valid PDF");
+          }
 
 
-        const compressionRatio = compressionResult.compressionRatio;
-        const compressedBuffer = await fs.readFile(compressionResult.filePath);
+          try {
+            await execPromise("which gs");
+            console.log("✓ Ghostscript is available");
+          } catch (error) {
+            throw new Error("Ghostscript (gs) is not installed or not in PATH");
+          }
+
+          console.log("🔄 Starting PDF compression with Ghostscript...");
+          const compressionResult = await compressPDF(tempPdfPath);
+          console.log(`✅ Compression complete! Ratio: ${compressionResult.compressionRatio.toFixed(1)}%`);
+
+          const compressedBuffer = await fs.readFile(compressionResult.filePath);
+          console.log(`✅ Read compressed file, size: ${compressedBuffer.length} bytes`);
+
+          const compressedFileName = originalFileName.replace(/\.pdf$/i, "_compressed.pdf");
+          if (!compressedFileName.toLowerCase().endsWith('.pdf')) {
+            compressedFileName += '.pdf';
+          }
+
+          let caption = "";
+          if (compressionResult.underSizeLimit) {
+            if (compressionResult.originalSize <= 2) {
+              caption = `Your PDF was already under 2MB (${compressionResult.originalSize.toFixed(2)}MB)! I compressed it a little anyway to ${compressionResult.compressedSize.toFixed(2)}MB. Perfect for your school upload!`;
+            } else {
+              caption = `SUCCESS! I compressed your PDF from ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB (${compressionResult.compressionRatio.toFixed(1)}% reduction). It's now under 2MB and ready for your school upload! You're welcome... not that I worked hard on this for you or anything!`;
+            }
+          } else if (compressionResult.compressionRatio > 50) {
+            caption = `I shrunk your PDF by an impressive ${compressionResult.compressionRatio.toFixed(1)}%! From ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB! But it's still over the 2MB school limit... I tried my best, b-baka!`;
+          } else if (compressionResult.compressionRatio > 20) {
+            caption = `I compressed your PDF by ${compressionResult.compressionRatio.toFixed(1)}%... from ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB. It's still over 2MB though! Your file must be really complex, not that it's my fault!`;
+          } else if (compressionResult.compressionRatio > 0) {
+            caption = `I barely managed to compress this PDF by ${compressionResult.compressionRatio.toFixed(1)}%... That's ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB. It's still over 2MB! Maybe try removing some images from your document?`;
+          } else {
+            caption = `I-I couldn't make it any smaller than ${compressionResult.compressedSize.toFixed(2)}MB! Your PDF was already highly optimized! It's still over the 2MB school limit though... maybe try splitting it into multiple files?`;
+          }
+
+          console.log("📤 Sending compressed PDF back to user...");
+          await sock.sendMessage(
+            sender,
+            {
+              document: compressedBuffer,
+              mimetype: "application/pdf",
+              fileName: compressedFileName,
+              caption: caption,
+            },
+            { quoted: msg }
+          );
 
 
-        const compressedFileName = originalFileName.replace(".pdf", "_compressed.pdf");
+          console.log("🧹 Cleaning up temporary files...");
+          await fs.unlink(tempPdfPath).catch(err => console.error("Failed to delete original PDF:", err));
+          await fs.unlink(compressionResult.filePath).catch(err => console.error("Failed to delete compressed PDF:", err));
 
-
-        let caption = "";
-        if (compressionRatio > 50) {
-          caption = `I shrunk your PDF by an impressive ${compressionRatio.toFixed(1)}%! ${compressionResult.originalSize.toFixed(2)}MB to just ${compressionResult.compressedSize.toFixed(2)}MB! ...N-not that I'm showing off my compression skills or anything!`;
-        } else if (compressionRatio > 20) {
-          caption = `I compressed your PDF by ${compressionRatio.toFixed(1)}%... from ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB. It's not my fault if it couldn't be compressed more, b-baka!`;
-        } else if (compressionRatio > 0) {
-          caption = `I barely managed to compress this PDF by ${compressionRatio.toFixed(1)}%... That's just ${compressionResult.originalSize.toFixed(2)}MB to ${compressionResult.compressedSize.toFixed(2)}MB. It was already quite optimized, not that I'm making excuses or anything!`;
-        } else {
-          caption = `I-I couldn't make it any smaller! Your PDF was already optimized at ${compressionResult.originalSize.toFixed(2)}MB! Don't blame me for your already-efficient file, hmph!`;
+          console.log(`✅ Compressed PDF sent successfully, ratio: ${compressionResult.compressionRatio.toFixed(1)}%`);
+        } catch (downloadError) {
+          console.error("❌ Error processing PDF:", downloadError);
+          await sock.sendMessage(
+            sender,
+            {
+              text: "I had trouble downloading that PDF! Make sure it's a proper PDF file and not corrupted. Or maybe WhatsApp is being stupid again... try sending the file once more?",
+            },
+            { quoted: msg }
+          );
         }
-
-
-        await sock.sendMessage(
-          sender,
-          {
-            document: compressedBuffer,
-            mimetype: "application/pdf",
-            fileName: compressedFileName,
-            caption: caption,
-          },
-          { quoted: msg }
-        );
-
-
-        await fs.unlink(tempPdfPath).catch(console.error);
-        await fs.unlink(compressionResult.filePath).catch(console.error);
-
-        console.log(`✅ Compressed PDF sent successfully, ratio: ${compressionRatio.toFixed(1)}%`);
       } catch (error) {
         console.error("❌ Error in /comp command:", error);
         await sock.sendMessage(
