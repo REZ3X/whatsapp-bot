@@ -601,6 +601,65 @@ async function compressPDF(inputPath) {
   }
 }
 
+async function saveGreetedGroups() {
+  try {
+    const greetedGroupsArray = Array.from(greetedGroups);
+    await fs.writeFile(
+      path.join(__dirname, 'greeted-groups.json'),
+      JSON.stringify(greetedGroupsArray),
+      'utf8'
+    );
+    console.log('✅ Successfully saved greeted groups data');
+  } catch (error) {
+    console.error('❌ Error saving greeted groups:', error);
+  }
+}
+
+async function loadGreetedGroups() {
+  try {
+    const data = await fs.readFile(
+      path.join(__dirname, 'greeted-groups.json'),
+      'utf8'
+    );
+    const greetedGroupsArray = JSON.parse(data);
+    greetedGroupsArray.forEach(group => greetedGroups.add(group));
+    console.log(`✅ Loaded ${greetedGroupsArray.length} greeted groups from file`);
+  } catch (error) {
+    console.log('⚠️ No saved greeted groups found or error loading them');
+  }
+}
+
+async function sendRestartNotification(sock) {
+  try {
+    const chats = await sock.groupFetchAllParticipating();
+    console.log(
+      `🔍 Checking ${Object.keys(chats).length} groups for restart notification`
+    );
+
+    for (const [groupId, groupData] of Object.entries(chats)) {
+      try {
+        console.log(`✓ Sending restart notification to: ${groupData.subject}`);
+
+        const restartMessage = `*Systems Reactivated!*
+
+I-it's not like I missed you all or anything! My systems were just restarted and I'm back online...not that I care if you noticed I was gone, b-baka!
+
+Type */help* or */menu* if you need a refresher on what I can do. Not that I'm eager to help or anything...hmph!`;
+
+        await sock.sendMessage(groupId, { text: restartMessage });
+        console.log(`✅ Restart notification sent to group: ${groupData.subject}`);
+      } catch (error) {
+        console.error(
+          `❌ Failed to send restart notification to ${groupData.subject}:`,
+          error
+        );
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error in sendRestartNotification:", error);
+  }
+}
+
 async function getRandomQuote() {
 
   const quote = getRandomItem(lifeQuotes);
@@ -2135,12 +2194,12 @@ async function startBot() {
     } else if (connection === "open") {
       console.log("✅ Bot connected and ready!");
 
-      console.log("🔄 Checking for groups that need introduction...");
+      console.log("🔄 Loading previously greeted groups...");
+      await loadGreetedGroups();
 
+      console.log("🔄 Sending restart notifications...");
       setTimeout(async () => {
-        await checkAndSendIntroduction(sock);
-
-
+        await sendRestartNotification(sock);
 
         const earthquakeNotifyGroups = ['120363159997880450@g.us'];
         earthquakeMonitor.initEarthquakeMonitor(sock, earthquakeNotifyGroups, 5);
@@ -2199,10 +2258,10 @@ async function startBot() {
             await new Promise((resolve) => setTimeout(resolve, 3000));
 
             const introMessage = `*What? ${groupName}?!*
-  
+    
   Another group huh?! Hmph! Fine, whatever... I-it's not like I wanted to join or anything, b-baka!
   I'm VOID-X, an alter solid existence of Xiannyaa~ created by ${ownerInfo.name}.
-  
+    
   *W-what can I do?* Not that I care if you use these features or not!
   • I-I'm not doing these things because I like you, got it?!
   • Convert images to stickers and back... s-such a pain!
@@ -2212,7 +2271,7 @@ async function startBot() {
   • P-play Truth or Dare games... n-not that it's fun or anything!
   • Show my stats... d-don't get any weird ideas about looking at me!
   • And some more... l-look for yourself with /menu or /help, I'm not your guide!
-  
+    
   _I-it's not like I'll be sad if you don't use me... baka!_`;
 
             let sendSuccess = false;
@@ -2228,6 +2287,11 @@ async function startBot() {
                 console.log(
                   `✅ Bot introduction sent successfully to group: ${groupName}`
                 );
+
+
+                greetedGroups.add(groupId);
+                await saveGreetedGroups();
+
               } catch (sendError) {
                 console.error(
                   `❌ Failed to send introduction (attempt ${attempts}):`,
@@ -2312,25 +2376,29 @@ async function startBot() {
           );
 
           const introMessage = `*What? ${group.subject}?!*
-  
-          Another group huh?! Hmph! Fine, whatever... I-it's not like I wanted to join or anything, b-baka!
-          I'm VOID-X, an alter solid existence of Xiannyaa~ created by ${ownerInfo.name}.
-          
-          *W-what can I do?* Not that I care if you use these features or not!
-          • I-I'm not doing these things because I like you, got it?!
-          • Convert images to stickers and back... s-such a pain!
-          • Tag all losers in any group with /tagall... not that I enjoy helping!
-          • Show the weather if you're too lazy to check yourself, hmph!
-          • Find free games because you're too broke to buy them, I guess...
-          • P-play Truth or Dare games... n-not that it's fun or anything!
-          • Show my stats... d-don't get any weird ideas about looking at me!
-          • And some more... l-look for yourself with /menu or /help, I'm not your guide!
-          
-          _I-it's not like I'll be sad if you don't use me... baka!_`;
+    
+  Another group huh?! Hmph! Fine, whatever... I-it's not like I wanted to join or anything, b-baka!
+  I'm VOID-X, an alter solid existence of Xiannyaa~ created by ${ownerInfo.name}.
+    
+  *W-what can I do?* Not that I care if you use these features or not!
+  • I-I'm not doing these things because I like you, got it?!
+  • Convert images to stickers and back... s-such a pain!
+  • Tag all losers in any group with /tagall... not that I enjoy helping!
+  • Show the weather if you're too lazy to check yourself, hmph!
+  • Find free games because you're too broke to buy them, I guess...
+  • P-play Truth or Dare games... n-not that it's fun or anything!
+  • Show my stats... d-don't get any weird ideas about looking at me!
+  • And some more... l-look for yourself with /menu or /help, I'm not your guide!
+    
+  _I-it's not like I'll be sad if you don't use me... baka!_`;
 
           await sock.sendMessage(group.id, { text: introMessage });
           console.log(`✅ Introduction sent to new group: ${group.subject}`);
+
+
           greetedGroups.add(group.id);
+          await saveGreetedGroups();
+
         } catch (error) {
           console.error(
             `❌ Failed to send intro to new group ${group.subject}:`,
