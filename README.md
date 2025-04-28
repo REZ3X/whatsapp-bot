@@ -36,7 +36,7 @@ sudo pacman -S nodejs npm git ffmpeg libwebp imagemagick libreoffice
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/your-username/whatsapp-bot.git
+git clone https://github.com/REZ3X/whatsapp-bot.git
 cd whatsapp-bot
 ```
 
