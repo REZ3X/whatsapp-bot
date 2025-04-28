@@ -67,3 +67,6 @@ backup/
 debug/
 .coverage
 coverage/
+
+greeted-groups.json
+lastEarthquake.json
