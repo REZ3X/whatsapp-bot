@@ -30,6 +30,8 @@ const ffmpegPath = require("ffmpeg-static");
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const earthquakeMonitor = require('./earthquakeMonitor');
+const changelog = require('./changelog');
+const reminderSystem = require('./reminderSystem');
 
 const activeConfessions = {};
 
@@ -2173,23 +2175,24 @@ async function startBot() {
     version,
     auth: state,
   });
+  try {
+    await reminderSystem.initializeDatabase();
+    reminderSystem.startReminderChecker(sock);
+  } catch (error) {
+    console.error("❌ Failed to initialize reminder system:", error);
+  }
 
   const botStartTime = new Date();
 
   sock.ev.on("connection.update", async (update) => {
-    const { qr, connection, lastDisconnect } = update;
-
-    if (qr) {
-      qrcode.generate(qr, { small: true });
-    }
+    const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !==
-        DisconnectReason.loggedOut;
-      console.log("connection closed. Reconnecting...", shouldReconnect);
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log("Connection closed due to ", lastDisconnect?.error, "Reconnecting: ", shouldReconnect);
       if (shouldReconnect) {
-        startBot();
+        console.log("Changelog sender disconnected. Please restart manually if needed.");
+        process.exit(1); 
       }
     } else if (connection === "open") {
       console.log("✅ Bot connected and ready!");
@@ -2197,10 +2200,7 @@ async function startBot() {
       console.log("🔄 Loading previously greeted groups...");
       await loadGreetedGroups();
 
-      console.log("🔄 Sending restart notifications...");
       setTimeout(async () => {
-        await sendRestartNotification(sock);
-
         const earthquakeNotifyGroups = ['120363159997880450@g.us'];
         earthquakeMonitor.initEarthquakeMonitor(sock, earthquakeNotifyGroups, 5);
       }, 5000);
@@ -2605,6 +2605,10 @@ async function startBot() {
       3️⃣3️⃣ */achievement* - View my milestone... not that I'm proud of my 5000 lines of code or anything, hmph!
       3️⃣4️⃣ */confess [message]* or */confess [phone] [message]* - Send anonymous confessions... not that I care about your pathetic love life or anything!
       3️⃣5️⃣ */comp* - Compress PDF files to reduce size... I-it's not like I enjoy making things smaller for you or anything, hmph!
+      3️⃣6️⃣ */reminder [time] [text]* - Set a reminder... (Admin only) not that I care about your schedule!
+      3️⃣7️⃣ */reminder [chat ID] [time] [text]* - Set a reminder for another chat (Admin only)
+      3️⃣8️⃣ */listreminders* - List your active reminders... anyone can check, but only admins can set them, hmph!
+      3️⃣9️⃣ */delreminder [ID]* - Delete a reminder by its ID (Admin only)... as if I wanted to keep track of your schedules anyway!
         
       📅 *Current time:* ${dateTimeString} (GMT+7)${weatherInfo}
         
@@ -3207,7 +3211,6 @@ async function startBot() {
     🧠 *CPU:* ${stats.cpuModel} (${stats.cpuCores} cores)
     📊 *CPU Usage:* ${stats.cpuUsage}%
     ⏰ *System Uptime:* ${stats.systemUptime.days}d ${stats.systemUptime.hours}h ${stats.systemUptime.minutes}m
-    ⌚ *Bot Uptime:* ${botUptimeDays}d ${botUptimeHours}h ${botUptimeMinutes}m
     🔧 *Node.js:* ${stats.nodeVersion}
     💻 *Platform:* ${stats.platform}
     
@@ -4227,6 +4230,18 @@ async function startBot() {
         }
 
         let media;
+        if (type === "viewOnceMessageV2" || type === "viewOnceMessage" ||
+          msg.message.viewOnceMessageV2 || msg.message.viewOnceMessage) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "H-hey! That's a 'view once' message! I can't edit something that was meant to disappear! Use the */visible* command first if you really need to extract the content, b-baka!",
+            },
+            { quoted: msg }
+          );
+          console.log("⚠️ Blocked attempt to edit direct view once message");
+          return;
+        }
 
         if (type === "imageMessage") {
           media = await downloadMediaMessage(msg, "buffer", {});
@@ -4238,6 +4253,20 @@ async function startBot() {
               id: msg.message.extendedTextMessage.contextInfo.stanzaId,
             },
           };
+          const quotedMsgType = Object.keys(quotedMsg.message)[0];
+          if (quotedMsgType === "viewOnceMessageV2" || quotedMsgType === "viewOnceMessage" ||
+            JSON.stringify(quotedMsg.message).includes("viewOnce")) {
+            await sock.sendMessage(
+              sender,
+              {
+                text: "Nice try! I won't edit view-once images! That content was meant to disappear, not be modified! Use */visible* first if you really need to extract it, then edit the extracted image.",
+              },
+              { quoted: msg }
+            );
+            console.log("⚠️ Blocked attempt to edit replied view-once message");
+            return;
+          }
+
           media = await downloadMediaMessage(quotedMsg, "buffer", {});
         } else {
           await sock.sendMessage(
@@ -4291,6 +4320,18 @@ async function startBot() {
     if (textMsg.toLowerCase() === "/hitamkan") {
       try {
         let media;
+        if (type === "viewOnceMessageV2" || type === "viewOnceMessage" ||
+          msg.message.viewOnceMessageV2 || msg.message.viewOnceMessage) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "H-hey! That's a 'view once' message! I can't transform something that was meant to disappear! Use the */visible* command first if you really need to extract the content, b-baka!",
+            },
+            { quoted: msg }
+          );
+          console.log("⚠️ Blocked attempt to apply hitamkan filter to direct view once message");
+          return;
+        }
 
         if (type === "imageMessage") {
           media = await downloadMediaMessage(msg, "buffer", {});
@@ -4302,6 +4343,20 @@ async function startBot() {
               id: msg.message.extendedTextMessage.contextInfo.stanzaId,
             },
           };
+          const quotedMsgType = Object.keys(quotedMsg.message)[0];
+          if (quotedMsgType === "viewOnceMessageV2" || quotedMsgType === "viewOnceMessage" ||
+            JSON.stringify(quotedMsg.message).includes("viewOnce")) {
+            await sock.sendMessage(
+              sender,
+              {
+                text: "Nice try! I won't transform view-once images! That content was meant to disappear, not be modified! Use */visible* first if you really need to extract it, then apply filters.",
+              },
+              { quoted: msg }
+            );
+            console.log("⚠️ Blocked attempt to apply hitamkan filter to replied view-once message");
+            return;
+          }
+
           media = await downloadMediaMessage(quotedMsg, "buffer", {});
         } else {
           await sock.sendMessage(
@@ -4771,19 +4826,14 @@ async function startBot() {
         }
 
         console.log("Earthquake data received:", JSON.stringify(earthquakeData, null, 2));
-
-
-        const notification = formatEarthquakeMessage(earthquakeData);
-
+        const notification = earthquakeMonitor.formatEarthquakeMessage(earthquakeData);
 
         if (notification.imageUrl) {
-
           await sock.sendMessage(sender, {
             image: { url: notification.imageUrl },
             caption: notification.text
           }, { quoted: msg });
         } else {
-
           await sock.sendMessage(sender, {
             text: notification.text
           }, { quoted: msg });
@@ -5185,8 +5235,9 @@ async function startBot() {
           return;
         }
 
-        const masterNumber = `${MASTER_NUMBER}@s.whatsapp.net`;
-        const isMaster = sender === masterNumber;
+        const masterNumber = MASTER_NUMBER;
+        const senderNumber = sender.split('@')[0].split(':')[0];
+        const isMaster = senderNumber === masterNumber;
 
         if (!userPrompt) {
           if (isMaster) {
@@ -6172,6 +6223,263 @@ _I didn't spend extra time making this information detailed for you or anything!
           sender,
           {
             text: "I-I failed to compress your stupid PDF! Maybe it was corrupt, or... or maybe I just didn't feel like helping you right now! Try again if you must...",
+          },
+          { quoted: msg }
+        );
+      }
+      return;
+    }
+
+    if (textMsg.toLowerCase().startsWith("/reminder")) {
+      try {
+        if (!sender.endsWith("@g.us")) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "B-baka! The reminder feature only works in group chats! Don't try to use it in private chats!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+        const senderJid = msg.key.participant;
+        const masterNumber = MASTER_NUMBER;
+        const senderNumber = senderJid.split('@')[0].split(':')[0];
+        const isMaster = senderNumber === masterNumber;
+
+        let isAdmin = false;
+        if (!isMaster) {
+          try {
+            const groupMetadata = await sock.groupMetadata(sender);
+            isAdmin = groupMetadata.participants
+              .filter(p => p.id === senderJid)
+              .some(p => p.admin === 'admin' || p.admin === 'superadmin');
+          } catch (metaError) {
+            console.error("❌ Error fetching group metadata:", metaError);
+          }
+        }
+        if (!isAdmin && !isMaster) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Hmph! Only group admins can set reminders! Who do you think you are trying to command everyone, b-baka?!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        console.log(`📝 Processing reminder command from user ${senderJid} (isMaster: ${isMaster}, isAdmin: ${isAdmin})`);
+
+        const parsed = reminderSystem.parseReminderCommand(textMsg);
+
+        if (!parsed.success) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: `B-baka! ${parsed.error}! Use the command like this:\n\n*/reminder 30m Group meeting reminder*\n\nYou can use formats like "30m", "2h", "1d", "14:30", "22:15", or "25/12".`,
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+        const targetChatId = sender;
+        const creatorId = senderJid;
+
+        await sock.sendMessage(
+          sender,
+          {
+            text: `I'm setting a group reminder for ${parsed.timeString}... N-not that I care about helping this group stay organized or anything!`,
+          },
+          { quoted: msg }
+        );
+
+        const result = await reminderSystem.addReminder(targetChatId, creatorId, parsed.text, parsed.time);
+
+        if (result.success) {
+          const reminderTime = reminderSystem.formatDateTime(parsed.time);
+          await sock.sendMessage(
+            sender,
+            {
+              text: `Fine! I've set a reminder for ${reminderTime}. I'll remind everyone in this group about: "${parsed.text}"\n\nN-not that I'll be eagerly waiting to interrupt your conversations or anything... hmph!`,
+            },
+            { quoted: msg }
+          );
+          console.log(`✅ Group reminder set for ${reminderTime} in ${targetChatId} by ${creatorId}`);
+        } else {
+          await sock.sendMessage(
+            sender,
+            {
+              text: `I couldn't set the reminder! Something went wrong with the database... Not that I was looking forward to reminding this group anyway!`,
+            },
+            { quoted: msg }
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error in reminder command:", error);
+        await sock.sendMessage(
+          sender,
+          {
+            text: "I-I couldn't process your reminder command! Something went wrong... Not that I'm eager to remind your group of anything!",
+          },
+          { quoted: msg }
+        );
+      }
+      return;
+    }
+    if (textMsg.toLowerCase() === "/listreminders") {
+      try {
+        if (!sender.endsWith("@g.us")) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "B-baka! The reminder feature only works in group chats! Don't try to use it in private chats!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        const reminders = await reminderSystem.listReminders(sender);
+
+        if (reminders.length === 0) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "This group doesn't have any active reminders! Not that I was hoping to remind you all of anything anyway... hmph!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        let reminderList = "*Group Reminders:*\n\n";
+        reminders.forEach((reminder, index) => {
+          const time = reminderSystem.formatDateTime(new Date(reminder.reminder_time));
+          reminderList += `${index + 1}. ID: ${reminder.id} - ${time}\n"${reminder.reminder_text}"\n\n`;
+        });
+
+        reminderList += "To delete a reminder, admins can use */delreminder [ID]*\n\nNot that I want to keep track of this group's schedule or anything... b-baka!";
+
+        await sock.sendMessage(sender, { text: reminderList }, { quoted: msg });
+        console.log(`📋 Listed ${reminders.length} reminders for group ${sender}`);
+      } catch (error) {
+        console.error("❌ Error listing reminders:", error);
+        await sock.sendMessage(
+          sender,
+          {
+            text: "I couldn't retrieve the group's reminders! The database is probably being stupid... Not my fault!",
+          },
+          { quoted: msg }
+        );
+      }
+      return;
+    }
+    if (textMsg.toLowerCase().startsWith("/delreminder")) {
+      try {
+        if (!sender.endsWith("@g.us")) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "B-baka! The reminder feature only works in group chats! Don't try to use it in private chats!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+        const senderJid = msg.key.participant;
+        const masterNumber = MASTER_NUMBER;
+        const senderNumber = senderJid.split('@')[0].split(':')[0];
+        const isMaster = senderNumber === masterNumber;
+
+        let isAdmin = false;
+        if (!isMaster) {
+          try {
+            const groupMetadata = await sock.groupMetadata(sender);
+            isAdmin = groupMetadata.participants
+              .filter(p => p.id === senderJid)
+              .some(p => p.admin === 'admin' || p.admin === 'superadmin');
+          } catch (metaError) {
+            console.error("❌ Error fetching group metadata:", metaError);
+          }
+        }
+        if (!isAdmin && !isMaster) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "Hmph! Only group admins can delete reminders! Who do you think you are trying to command everyone, b-baka?!",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        const idStr = textMsg.substring("/delreminder".length).trim();
+        const id = parseInt(idStr);
+
+        if (isNaN(id)) {
+          await sock.sendMessage(
+            sender,
+            {
+              text: "B-baka! You need to provide a valid reminder ID! Use */reminders* first to see the group's reminders and their IDs.",
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+        await sock.sendMessage(
+          sender,
+          {
+            text: `Attempting to delete reminder #${id}... Not that I care about your schedule changes or anything!`,
+          },
+          { quoted: msg }
+        );
+
+        console.log(`🗑️ Attempting to delete reminder ${id} from ${sender} by user ${senderJid} (isMaster: ${isMaster}, isAdmin: ${isAdmin})`);
+
+        const success = await reminderSystem.deleteReminder(id, sender, true);
+
+        if (success) {
+          console.log(`✅ Reminder deletion reported success for ID ${id}`);
+          const remindersAfter = await reminderSystem.listReminders(sender);
+          console.log(`📋 After deletion: Found ${remindersAfter.length} reminders, checking for ID ${id}`);
+
+          const stillExists = remindersAfter.some(reminder => reminder.id === id);
+
+          if (stillExists) {
+            console.log(`⚠️ Warning: Reminder ${id} still exists after deletion attempt`);
+            await sock.sendMessage(
+              sender,
+              {
+                text: `Something strange is happening... I tried to delete reminder #${id} but it's still there! The database must be glitching!`,
+              },
+              { quoted: msg }
+            );
+          } else {
+            await sock.sendMessage(
+              sender,
+              {
+                text: `I've deleted reminder #${id}... Not that I care if you forget whatever it was about now!`,
+              },
+              { quoted: msg }
+            );
+            console.log(`🗑️ Successfully deleted reminder ${id} for ${sender}`);
+          }
+        } else {
+          await sock.sendMessage(
+            sender,
+            {
+              text: `I couldn't find reminder #${id}! Maybe it doesn't exist, or it's not in this group! Hmph!`,
+            },
+            { quoted: msg }
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error deleting reminder:", error);
+        await sock.sendMessage(
+          sender,
+          {
+            text: "I-I couldn't delete the reminder! The database is probably being annoying... Not like I wanted to help this group anyway!",
           },
           { quoted: msg }
         );
